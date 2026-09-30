@@ -1,8 +1,9 @@
 /**
  * Audio Engine for Gefle Bells Carillon
- * - Web Audio API Polyphonic Sample Player
+ * - Web Audio API Polyphonic Sample Player with Intelligent Pitch-Shifting
  * - Physical modeling Carillon Bell Synthesizer (5 tuned partials + clapper strike)
  * - Bell Tower Convolution Reverb
+ * - Immediate background preloading on startup
  * - IndexedDB Custom Sample loader
  */
 
@@ -20,6 +21,10 @@ class CarillonAudioEngine {
   // Decoded audio buffers: bellId -> AudioBuffer
   private sampleBuffers = new Map<string, AudioBuffer>();
   private customSampleMetadata = new Map<string, string>(); // bellId -> filename
+
+  // Initialization & preloading
+  private initPromise: Promise<void> | null = null;
+  private sampleListeners = new Set<(count: number) => void>();
 
   // Settings
   private settings: AudioSettings = {
@@ -55,40 +60,79 @@ class CarillonAudioEngine {
     }
   }
 
+  public onSamplesUpdated(cb: (count: number) => void): () => void {
+    this.sampleListeners.add(cb);
+    cb(this.sampleBuffers.size);
+    return () => this.sampleListeners.delete(cb);
+  }
+
+  private notifySamplesUpdated(): void {
+    const count = this.sampleBuffers.size;
+    this.sampleListeners.forEach((cb) => {
+      try {
+        cb(count);
+      } catch {}
+    });
+  }
+
   /**
-   * Initializes or wakes up the AudioContext on user interaction
+   * Immediately setups the AudioContext and begins parallel loading
+   * of all bundled and IndexedDB samples so sound is available instantly.
+   */
+  public init(): Promise<void> {
+    if (this.initPromise) return this.initPromise;
+
+    this.initPromise = (async () => {
+      try {
+        if (!this.ctx && typeof window !== 'undefined') {
+          const AudioCtxClass =
+            window.AudioContext ||
+            (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+          this.ctx = new AudioCtxClass();
+
+          // Master gain
+          this.masterGain = this.ctx.createGain();
+          this.masterGain.gain.setValueAtTime(this.settings.masterVolume, this.ctx.currentTime);
+          this.masterGain.connect(this.ctx.destination);
+
+          // Reverb routing
+          this.dryGain = this.ctx.createGain();
+          this.wetGain = this.ctx.createGain();
+          this.wetGain.gain.setValueAtTime(this.settings.reverbAmount, this.ctx.currentTime);
+          this.dryGain.gain.setValueAtTime(1 - this.settings.reverbAmount * 0.4, this.ctx.currentTime);
+
+          this.convolver = this.ctx.createConvolver();
+          this.convolver.buffer = this.createBelfryImpulseResponse(this.ctx);
+
+          this.dryGain.connect(this.masterGain);
+          this.convolver.connect(this.wetGain);
+          this.wetGain.connect(this.masterGain);
+        }
+
+        // Concurrently load user custom samples from IndexedDB and bundled samples
+        await Promise.allSettled([
+          this.loadStoredSamples(),
+          this.preloadBundledSamples(),
+        ]);
+      } catch (err) {
+        console.warn('AudioEngine init error:', err);
+      }
+    })();
+
+    return this.initPromise;
+  }
+
+  /**
+   * Resumes AudioContext on user interaction
    */
   public async wake(): Promise<void> {
-    if (!this.ctx) {
-      const AudioCtxClass = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
-      this.ctx = new AudioCtxClass();
-
-      // Master gain
-      this.masterGain = this.ctx.createGain();
-      this.masterGain.gain.setValueAtTime(this.settings.masterVolume, this.ctx.currentTime);
-      this.masterGain.connect(this.ctx.destination);
-
-      // Reverb routing
-      this.dryGain = this.ctx.createGain();
-      this.wetGain = this.ctx.createGain();
-      this.wetGain.gain.setValueAtTime(this.settings.reverbAmount, this.ctx.currentTime);
-      this.dryGain.gain.setValueAtTime(1 - this.settings.reverbAmount * 0.4, this.ctx.currentTime);
-
-      this.convolver = this.ctx.createConvolver();
-      this.convolver.buffer = this.createBelfryImpulseResponse(this.ctx);
-
-      this.dryGain.connect(this.masterGain);
-      this.convolver.connect(this.wetGain);
-      this.wetGain.connect(this.masterGain);
-
-      // Load user custom samples from IndexedDB
-      await this.loadStoredSamples();
-      // Preload bundled samples from public/samples/ if present
-      await this.preloadBundledSamples();
-    }
-
-    if (this.ctx.state === 'suspended') {
-      await this.ctx.resume();
+    await this.init();
+    if (this.ctx && this.ctx.state === 'suspended') {
+      try {
+        await this.ctx.resume();
+      } catch (err) {
+        console.warn('Could not resume AudioContext:', err);
+      }
     }
   }
 
@@ -105,9 +149,7 @@ class CarillonAudioEngine {
 
     for (let i = 0; i < length; i++) {
       const t = i / rate;
-      // Exponential decay envelope with warm high-frequency absorption
       const decay = Math.exp(-t * 2.2);
-      // Discrete early reflections + diffuse tail
       const noiseL = (Math.random() * 2 - 1) * decay;
       const noiseR = (Math.random() * 2 - 1) * decay;
 
@@ -131,6 +173,7 @@ class CarillonAudioEngine {
           const decoded = await this.ctx.decodeAudioData(arrayBuffer);
           this.sampleBuffers.set(item.bellId, decoded);
           this.customSampleMetadata.set(item.bellId, item.fileName);
+          this.notifySamplesUpdated();
         } catch (err) {
           console.warn(`Could not decode custom sample for ${item.bellId}`, err);
         }
@@ -142,21 +185,25 @@ class CarillonAudioEngine {
 
   /**
    * Automatically attempts to preload bundled audio samples from public/samples/
-   * If found in repository, decodes and caches in memory. If not present (e.g. 404), gracefully skips.
+   * If found in repository, decodes and caches in memory.
    */
   public async preloadBundledSamples(): Promise<number> {
     if (!this.ctx) return 0;
     const baseUrl = (import.meta.env.BASE_URL || './').replace(/\/+$/, '') + '/';
     let loadedCount = 0;
 
-    await Promise.all(
+    await Promise.allSettled(
       GEFLE_BELLS.map(async (bell) => {
         // If already loaded from IndexedDB, don't overwrite
         if (this.sampleBuffers.has(bell.id)) return;
 
+        const file = bell.expectedFileName;
         const candidates = [
-          `${baseUrl}samples/${bell.expectedFileName}`,
-          `${baseUrl}samples/${encodeURIComponent(bell.expectedFileName)}`,
+          `${baseUrl}samples/${file}`,
+          `${baseUrl}samples/${encodeURIComponent(file)}`,
+          `${baseUrl}samples/${file.toLowerCase()}`,
+          `${baseUrl}samples/${file.replace('#', 's')}`,
+          `${baseUrl}samples/${file.replace('#', '%23')}`,
         ];
 
         for (const url of candidates) {
@@ -175,6 +222,7 @@ class CarillonAudioEngine {
             this.sampleBuffers.set(bell.id, decoded);
             this.customSampleMetadata.set(bell.id, bell.expectedFileName);
             loadedCount++;
+            this.notifySamplesUpdated();
             break;
           } catch {
             // File not present or decode error, skip
@@ -195,12 +243,12 @@ class CarillonAudioEngine {
 
     try {
       const arrayBuffer = await file.arrayBuffer();
-      // Make a copy for decodeAudioData since it detaches the buffer
       const bufferForDecode = arrayBuffer.slice(0);
       const decoded = await this.ctx.decodeAudioData(bufferForDecode);
 
       this.sampleBuffers.set(bellId, decoded);
       this.customSampleMetadata.set(bellId, fileName);
+      this.notifySamplesUpdated();
       return true;
     } catch (err) {
       console.error(`Failed to decode sample file ${fileName}:`, err);
@@ -211,6 +259,7 @@ class CarillonAudioEngine {
   public removeCustomSample(bellId: string): void {
     this.sampleBuffers.delete(bellId);
     this.customSampleMetadata.delete(bellId);
+    this.notifySamplesUpdated();
   }
 
   public hasCustomSample(bellId: string): boolean {
@@ -226,16 +275,52 @@ class CarillonAudioEngine {
   }
 
   /**
-   * Strike a bell by its ID (e.g. "C4", "Cs4", "A5")
+   * Finds the nearest loaded sample in pitch (by minimum MIDI distance)
+   * to pitch-shift authentic sound across the carillon keyboard.
+   */
+  private findNearestLoadedSample(targetMidi: number): { buffer: AudioBuffer; midiNote: number } | null {
+    if (this.sampleBuffers.size === 0) return null;
+
+    let closestBellId: string | null = null;
+    let minDistance = Infinity;
+
+    for (const [id, buffer] of this.sampleBuffers.entries()) {
+      if (!buffer) continue;
+      const bell = BELL_MAP.get(id);
+      if (!bell) continue;
+
+      const dist = Math.abs(bell.midiNote - targetMidi);
+      if (dist < minDistance) {
+        minDistance = dist;
+        closestBellId = id;
+      }
+    }
+
+    if (closestBellId) {
+      const b = BELL_MAP.get(closestBellId);
+      const buf = this.sampleBuffers.get(closestBellId);
+      if (b && buf) {
+        return { buffer: buf, midiNote: b.midiNote };
+      }
+    }
+
+    return null;
+  }
+
+  /**
+   * Strike a bell by its ID (e.g. "C1", "G1", "A3")
    * @param bellId The bell identifier
    * @param velocity Strike strength between 0.2 and 1.0
    * @param isPedal Whether this strike came from a foot pedal
    */
-  public strike(bellId: string, velocity = 0.9, isPedal = false): void {
+  public async strike(bellId: string, velocity = 0.9, isPedal = false): Promise<void> {
     const bell = BELL_MAP.get(bellId);
     if (!bell) return;
 
-    this.wake().catch(() => {});
+    if (!this.ctx || this.ctx.state === 'suspended') {
+      this.wake().catch(() => {});
+    }
+
     if (!this.ctx || !this.dryGain || !this.convolver) return;
 
     // Track recording
@@ -250,25 +335,60 @@ class CarillonAudioEngine {
       });
     }
 
-    const customBuffer = this.sampleBuffers.get(bellId);
+    // 1. Direct hit with exact authentic recorded sample
+    const directBuffer = this.sampleBuffers.get(bellId);
+    if (directBuffer) {
+      this.playSampleBuffer(directBuffer, velocity, isPedal, 1.0);
+      return;
+    }
 
-    if (customBuffer) {
-      // Play decoded authentic sample
-      this.playSampleBuffer(customBuffer, velocity, isPedal);
-    } else if (this.settings.useSynthesisFallback) {
-      // Play physically modeled bell
+    // 2. If preloading is actively in progress and no sample has decoded yet, wait up to 150ms
+    if (this.initPromise && this.sampleBuffers.size === 0) {
+      try {
+        await Promise.race([
+          this.initPromise,
+          new Promise((resolve) => setTimeout(resolve, 150)),
+        ]);
+        const retry = this.sampleBuffers.get(bellId);
+        if (retry) {
+          this.playSampleBuffer(retry, velocity, isPedal, 1.0);
+          return;
+        }
+      } catch {}
+    }
+
+    // 3. Pitch-shift from nearest authentic carillon sample
+    const nearest = this.findNearestLoadedSample(bell.midiNote);
+    if (nearest) {
+      const semitoneDiff = bell.midiNote - nearest.midiNote;
+      const playbackRate = Math.pow(2, semitoneDiff / 12);
+      this.playSampleBuffer(nearest.buffer, velocity, isPedal, playbackRate);
+      return;
+    }
+
+    // 4. Physical modeling fallback only if no sample exists anywhere in the library
+    if (this.settings.useSynthesisFallback) {
       this.synthesizeBellStrike(bell, velocity, isPedal);
     }
   }
 
   /**
-   * Play user-uploaded sample buffer
+   * Play sample buffer with optional pitch-shift playbackRate
    */
-  private playSampleBuffer(buffer: AudioBuffer, velocity: number, isPedal: boolean): void {
+  private playSampleBuffer(
+    buffer: AudioBuffer,
+    velocity: number,
+    isPedal: boolean,
+    playbackRate = 1.0
+  ): void {
     if (!this.ctx || !this.dryGain || !this.convolver) return;
 
     const source = this.ctx.createBufferSource();
     source.buffer = buffer;
+
+    if (playbackRate !== 1.0) {
+      source.playbackRate.setValueAtTime(playbackRate, this.ctx.currentTime);
+    }
 
     // Bell voice gain with velocity
     const voiceGain = this.ctx.createGain();
@@ -337,8 +457,7 @@ class CarillonAudioEngine {
       const osc = ctx.createOscillator();
       const pGain = ctx.createGain();
 
-      // Slightly detune partials to create natural bronze acoustic beating
-      const detuneCents = (Math.random() * 6 - 3);
+      const detuneCents = Math.random() * 6 - 3;
       osc.type = 'sine';
       osc.frequency.setValueAtTime(f0 * p.ratio, now);
       osc.detune.setValueAtTime(detuneCents, now);
@@ -347,9 +466,7 @@ class CarillonAudioEngine {
       const initialAmp = p.amp * (bell.isSharp ? 0.92 : 1.0);
 
       pGain.gain.setValueAtTime(0, now);
-      // Fast attack (1-2ms)
       pGain.gain.linearRampToValueAtTime(initialAmp, now + 0.003);
-      // Natural exponential decay
       pGain.gain.exponentialRampToValueAtTime(0.0001, now + pDuration);
 
       osc.connect(pGain);
@@ -359,7 +476,7 @@ class CarillonAudioEngine {
       osc.stop(now + pDuration + 0.1);
     });
 
-    // Clapper strike impact noise burst (metallic clack in first 10-20ms)
+    // Clapper strike impact noise burst
     const noiseBuffer = ctx.createBuffer(1, Math.floor(ctx.sampleRate * 0.025), ctx.sampleRate);
     const noiseData = noiseBuffer.getChannelData(0);
     for (let i = 0; i < noiseData.length; i++) {
@@ -382,7 +499,6 @@ class CarillonAudioEngine {
 
     noiseSource.start(now);
 
-    // Route bell bus to dry and reverb
     bellBus.connect(this.dryGain);
     bellBus.connect(this.convolver);
   }
@@ -432,3 +548,8 @@ class CarillonAudioEngine {
 }
 
 export const audioEngine = new CarillonAudioEngine();
+
+// Auto-start preloading immediately when script loads in browser
+if (typeof window !== 'undefined') {
+  audioEngine.init().catch(() => {});
+}

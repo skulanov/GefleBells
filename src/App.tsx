@@ -68,6 +68,25 @@ export default function App() {
 
   // Initialize
   useEffect(() => {
+    // 0. Immediately start audio context and preload bundled/stored samples
+    audioEngine.init().catch(() => {});
+
+    // Subscribe to sample loading events so the counter updates in real-time
+    const unsubscribeSamples = audioEngine.onSamplesUpdated((count) => {
+      setSampleCount(count);
+    });
+
+    // Global listener on first user interaction to resume AudioContext with zero latency
+    const handleFirstInteraction = () => {
+      audioEngine.wake().catch(() => {});
+      window.removeEventListener('pointerdown', handleFirstInteraction);
+      window.removeEventListener('keydown', handleFirstInteraction);
+      window.removeEventListener('touchstart', handleFirstInteraction);
+    };
+    window.addEventListener('pointerdown', handleFirstInteraction);
+    window.addEventListener('keydown', handleFirstInteraction);
+    window.addEventListener('touchstart', handleFirstInteraction);
+
     // 1. Load stored keybinds
     const binds = getCustomKeybinds();
     setCustomKeybinds(binds);
@@ -91,11 +110,12 @@ export default function App() {
     // 3. Audio settings
     audioEngine.updateSettings({ masterVolume, reverbAmount });
 
-    // 4. Update sample counter
-    setSampleCount(audioEngine.getAllLoadedSampleIds().length);
-
     return () => {
       unsubscribeMidi();
+      unsubscribeSamples();
+      window.removeEventListener('pointerdown', handleFirstInteraction);
+      window.removeEventListener('keydown', handleFirstInteraction);
+      window.removeEventListener('touchstart', handleFirstInteraction);
     };
   }, [refreshKeyLookup]);
 
