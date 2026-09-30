@@ -1,21 +1,21 @@
 import React from 'react';
 import { ViewMode } from '../types/carillon';
-import { Volume2, VolumeX, Sliders, Music, Info, GitBranch, Radio, Disc } from 'lucide-react';
+import { Volume2, VolumeX, Radio, Disc } from 'lucide-react';
 
 interface HeaderProps {
   currentView: ViewMode;
   onViewChange: (view: ViewMode) => void;
   masterVolume: number;
   onVolumeChange: (vol: number) => void;
-  reverbAmount: number;
-  onReverbChange: (amount: number) => void;
+  reverbAmount?: number;
+  onReverbChange?: (amount: number) => void;
   isMidiConnected: boolean;
   midiDeviceName: string;
   customSampleCount: number;
   isRecording: boolean;
-  onOpenInfo: () => void;
-  onOpenGitModal: () => void;
-  onOpenSettings: () => void;
+  onOpenInfo?: () => void;
+  onOpenGitModal?: () => void;
+  onOpenSettings?: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -23,15 +23,10 @@ export const Header: React.FC<HeaderProps> = ({
   onViewChange,
   masterVolume,
   onVolumeChange,
-  reverbAmount,
-  onReverbChange,
   isMidiConnected,
   midiDeviceName,
   customSampleCount,
   isRecording,
-  onOpenInfo,
-  onOpenGitModal,
-  onOpenSettings,
 }) => {
   const isMuted = masterVolume === 0;
 
@@ -150,38 +145,6 @@ export const Header: React.FC<HeaderProps> = ({
               title={`Громкость: ${Math.round(masterVolume * 100)}%`}
             />
           </div>
-
-          {/* Reverb ambience toggle */}
-          <button
-            onClick={() => onReverbChange(reverbAmount > 0.1 ? 0.05 : 0.45)}
-            className={`p-2 rounded-lg border transition-all ${
-              reverbAmount > 0.1
-                ? 'bg-amber-950/40 border-amber-700/50 text-amber-300'
-                : 'bg-stone-900/60 border-stone-800 text-stone-400 hover:text-stone-200'
-            }`}
-            title={`Акустика башни (реверберация): ${Math.round(reverbAmount * 100)}%`}
-          >
-            <Sliders className="w-4 h-4" />
-          </button>
-
-          {/* About Info Modal */}
-          <button
-            onClick={onOpenInfo}
-            className="p-2 rounded-lg bg-stone-900/60 border border-stone-800 text-stone-400 hover:text-stone-200 transition-colors"
-            title="О карильоне Gefle Bells"
-          >
-            <Info className="w-4 h-4" />
-          </button>
-
-          {/* GitHub Repo info & push modal */}
-          <button
-            onClick={onOpenGitModal}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-stone-900 hover:bg-stone-800 border border-stone-700 text-stone-200 text-xs font-medium transition-all"
-            title="Экспорт репозитория GefleBells на GitHub"
-          >
-            <GitBranch className="w-3.5 h-3.5 text-amber-400" />
-            <span className="hidden sm:inline">GitHub</span>
-          </button>
         </div>
       </div>
     </header>

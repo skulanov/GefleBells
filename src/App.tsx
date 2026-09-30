@@ -16,8 +16,6 @@ import { CarillonBelfry } from './components/CarillonBelfry';
 import { TrainingView } from './components/TrainingView';
 import { SampleManagerModal } from './components/SampleManagerModal';
 import { KeybindModal } from './components/KeybindModal';
-import { GefleInfoModal } from './components/GefleInfoModal';
-import { GitExportModal } from './components/GitExportModal';
 import { RecorderBar } from './components/RecorderBar';
 
 export default function App() {
@@ -34,8 +32,6 @@ export default function App() {
 
   // Modals
   const [isKeybindsOpen, setIsKeybindsOpen] = useState(false);
-  const [isInfoOpen, setIsInfoOpen] = useState(false);
-  const [isGitModalOpen, setIsGitModalOpen] = useState(false);
 
   // MIDI status
   const [midiConnected, setMidiConnected] = useState(false);
@@ -196,15 +192,10 @@ export default function App() {
         onViewChange={setCurrentView}
         masterVolume={masterVolume}
         onVolumeChange={handleVolumeChange}
-        reverbAmount={reverbAmount}
-        onReverbChange={handleReverbChange}
         isMidiConnected={midiConnected}
         midiDeviceName={midiDeviceName}
         customSampleCount={sampleCount}
         isRecording={isRecording}
-        onOpenInfo={() => setIsInfoOpen(true)}
-        onOpenGitModal={() => setIsGitModalOpen(true)}
-        onOpenSettings={() => setIsKeybindsOpen(true)}
       />
 
       {/* Main Content Area */}
@@ -263,12 +254,14 @@ export default function App() {
             <span className="text-stone-600">·</span>
             <span>Bergholtz Klockgjuteri 1972</span>
             <span className="text-stone-600">·</span>
-            <button
-              onClick={() => setIsGitModalOpen(true)}
-              className="text-amber-400/90 hover:text-amber-300 hover:underline cursor-pointer"
+            <a
+              href="https://github.com/skulanov/GefleBells"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-amber-400/90 hover:text-amber-300 hover:underline"
             >
               skulanov/GefleBells
-            </button>
+            </a>
           </div>
         </div>
       </main>
@@ -279,16 +272,6 @@ export default function App() {
         onClose={() => setIsKeybindsOpen(false)}
         customKeybinds={customKeybinds}
         onSaveKeybinds={handleSaveKeybinds}
-      />
-
-      <GefleInfoModal
-        isOpen={isInfoOpen}
-        onClose={() => setIsInfoOpen(false)}
-      />
-
-      <GitExportModal
-        isOpen={isGitModalOpen}
-        onClose={() => setIsGitModalOpen(false)}
       />
     </div>
   );
