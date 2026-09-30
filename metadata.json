@@ -2,5 +2,7 @@
   "name": "Gefle Bells — Карильонный тренажер",
   "description": "Интерактивный симулятор и тренажер карильона Gefle Bells (Gävle Carillon): аутентичная консоль с мануалом и педалями, звонница из 36 колоколов, загрузка пользовательских сэмплов, синтез колокольного звона и режим обучения.",
   "requestFramePermissions": [],
-  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
 }

@@ -35,10 +35,12 @@ export const Header: React.FC<HeaderProps> = ({
       <div className="max-w-7xl mx-auto flex flex-col md:flex-row items-center justify-between gap-3">
         {/* Zone 1: Brand Wordmark */}
         <div className="flex items-center gap-3">
-          <div className="flex items-center gap-2">
-            <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-amber-600 to-amber-900 flex items-center justify-center shadow-inner border border-amber-500/30 text-amber-200">
-              <span className="font-display font-bold text-lg">G</span>
-            </div>
+          <div className="flex items-center gap-2.5">
+            <img
+              src={`${import.meta.env.BASE_URL}favicon.svg`}
+              alt="Gefle Bells"
+              className="w-8 h-8 rounded-lg shadow-md border border-amber-600/40 select-none object-contain"
+            />
             <div>
               <span className="font-display text-xl font-bold tracking-tight text-amber-100">
                 Gefle Bells
