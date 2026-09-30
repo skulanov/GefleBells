@@ -6,6 +6,7 @@ import { audioEngine } from './audioEngine';
 import { GEFLE_BELLS } from '../data/gefleBellsData';
 
 type MidiNoteCallback = (bellId: string, velocity: number, isNoteOn: boolean) => void;
+export type MidiStatus = { isSupported: boolean; isConnected: boolean; deviceName: string };
 
 class MidiService {
   private midiAccess: MIDIAccess | null = null;
@@ -13,6 +14,7 @@ class MidiService {
   private isConnected = false;
   private activeDeviceName = '';
   private listeners = new Set<MidiNoteCallback>();
+  private stateChangeListeners = new Set<(status: MidiStatus) => void>();
 
   // Map MIDI note numbers (60 = C4) to BellData
   private noteToBellMap = new Map<number, string>();
@@ -23,10 +25,22 @@ class MidiService {
     });
   }
 
-  public async init(): Promise<boolean> {
+  /**
+   * Explicitly requests MIDI access upon user interaction.
+   * Does NOT run automatically on page load to prevent unwanted permission prompts.
+   */
+  public async init(): Promise<{ success: boolean; isConnected: boolean; deviceName: string; error?: string }> {
     if (typeof navigator === 'undefined' || !navigator.requestMIDIAccess) {
       this.isSupported = false;
-      return false;
+      this.isConnected = false;
+      this.activeDeviceName = '';
+      this.notifyStateChange();
+      return {
+        success: false,
+        isConnected: false,
+        deviceName: '',
+        error: 'Web MIDI API не поддерживается данным браузером',
+      };
     }
 
     try {
@@ -38,11 +52,36 @@ class MidiService {
         this.setupInputs();
       };
 
-      return true;
+      return {
+        success: true,
+        isConnected: this.isConnected,
+        deviceName: this.activeDeviceName,
+      };
     } catch {
       this.isSupported = false;
-      return false;
+      this.isConnected = false;
+      this.activeDeviceName = '';
+      this.notifyStateChange();
+      return {
+        success: false,
+        isConnected: false,
+        deviceName: '',
+        error: 'Доступ к MIDI отклонён или устройство недоступно',
+      };
     }
+  }
+
+  public disconnect(): void {
+    if (this.midiAccess) {
+      this.midiAccess.inputs.forEach((input) => {
+        input.onmidimessage = null;
+      });
+      this.midiAccess.onstatechange = null;
+      this.midiAccess = null;
+    }
+    this.isConnected = false;
+    this.activeDeviceName = '';
+    this.notifyStateChange();
   }
 
   private setupInputs(): void {
@@ -60,6 +99,7 @@ class MidiService {
       this.isConnected = false;
       this.activeDeviceName = '';
     }
+    this.notifyStateChange();
   }
 
   private handleMidiMessage(event: MIDIMessageEvent): void {
@@ -92,6 +132,14 @@ class MidiService {
     };
   }
 
+  public onStateChange(callback: (status: MidiStatus) => void): () => void {
+    this.stateChangeListeners.add(callback);
+    callback(this.getStatus());
+    return () => {
+      this.stateChangeListeners.delete(callback);
+    };
+  }
+
   private notifyListeners(bellId: string, velocity: number, isNoteOn: boolean): void {
     this.listeners.forEach((fn) => {
       try {
@@ -102,7 +150,18 @@ class MidiService {
     });
   }
 
-  public getStatus(): { isSupported: boolean; isConnected: boolean; deviceName: string } {
+  private notifyStateChange(): void {
+    const status = this.getStatus();
+    this.stateChangeListeners.forEach((fn) => {
+      try {
+        fn(status);
+      } catch (err) {
+        console.error('Error in MIDI state callback', err);
+      }
+    });
+  }
+
+  public getStatus(): MidiStatus {
     return {
       isSupported: this.isSupported,
       isConnected: this.isConnected,

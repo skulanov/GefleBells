@@ -36,6 +36,7 @@ export default function App() {
   // MIDI status
   const [midiConnected, setMidiConnected] = useState(false);
   const [midiDeviceName, setMidiDeviceName] = useState('');
+  const [isMidiConnecting, setIsMidiConnecting] = useState(false);
 
   // Sample status
   const [sampleCount, setSampleCount] = useState<number>(0);
@@ -92,9 +93,8 @@ export default function App() {
     setCustomKeybinds(binds);
     refreshKeyLookup(binds);
 
-    // 2. Initialize Web MIDI
-    midiService.init().then(() => {
-      const status = midiService.getStatus();
+    // 2. Subscribe to MIDI state and events (without calling navigator.requestMIDIAccess automatically)
+    const unsubscribeMidiState = midiService.onStateChange((status) => {
       setMidiConnected(status.isConnected);
       setMidiDeviceName(status.deviceName);
     });
@@ -112,12 +112,28 @@ export default function App() {
 
     return () => {
       unsubscribeMidi();
+      unsubscribeMidiState();
       unsubscribeSamples();
       window.removeEventListener('pointerdown', handleFirstInteraction);
       window.removeEventListener('keydown', handleFirstInteraction);
       window.removeEventListener('touchstart', handleFirstInteraction);
     };
   }, [refreshKeyLookup]);
+
+  // Toggle MIDI connection on user request
+  const handleToggleMidi = useCallback(async () => {
+    if (midiConnected) {
+      midiService.disconnect();
+      return;
+    }
+
+    setIsMidiConnecting(true);
+    try {
+      await midiService.init();
+    } finally {
+      setIsMidiConnecting(false);
+    }
+  }, [midiConnected]);
 
   // Strike handler
   const handleStrike = useCallback((bellId: string, velocity = 0.9, isPedal = false) => {
@@ -214,6 +230,8 @@ export default function App() {
         onVolumeChange={handleVolumeChange}
         isMidiConnected={midiConnected}
         midiDeviceName={midiDeviceName}
+        isMidiConnecting={isMidiConnecting}
+        onToggleMidi={handleToggleMidi}
         customSampleCount={sampleCount}
         isRecording={isRecording}
       />

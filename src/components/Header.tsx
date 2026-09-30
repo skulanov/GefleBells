@@ -1,6 +1,6 @@
 import React from 'react';
 import { ViewMode } from '../types/carillon';
-import { Volume2, VolumeX, Radio, Disc } from 'lucide-react';
+import { Volume2, VolumeX, Radio, Disc, Loader2 } from 'lucide-react';
 
 interface HeaderProps {
   currentView: ViewMode;
@@ -11,6 +11,8 @@ interface HeaderProps {
   onReverbChange?: (amount: number) => void;
   isMidiConnected: boolean;
   midiDeviceName: string;
+  isMidiConnecting?: boolean;
+  onToggleMidi?: () => void;
   customSampleCount: number;
   isRecording: boolean;
   onOpenInfo?: () => void;
@@ -25,6 +27,8 @@ export const Header: React.FC<HeaderProps> = ({
   onVolumeChange,
   isMidiConnected,
   midiDeviceName,
+  isMidiConnecting = false,
+  onToggleMidi,
   customSampleCount,
   isRecording,
 }) => {
@@ -114,18 +118,46 @@ export const Header: React.FC<HeaderProps> = ({
 
         {/* Zone 3: Primary Actions & Audio Controls */}
         <div className="flex items-center gap-2.5">
-          {/* MIDI indicator */}
-          <div
-            title={isMidiConnected ? `MIDI подключен: ${midiDeviceName}` : 'MIDI не подключен (подключите клавиатуру)'}
-            className={`flex items-center gap-1.5 px-2 py-1 rounded-md text-xs font-mono border ${
-              isMidiConnected
-                ? 'bg-emerald-950/60 border-emerald-800/60 text-emerald-300'
-                : 'bg-stone-900/40 border-stone-800/60 text-stone-500'
+          {/* MIDI toggle button */}
+          <button
+            onClick={onToggleMidi}
+            disabled={isMidiConnecting}
+            type="button"
+            title={
+              isMidiConnecting
+                ? 'Поиск и подключение MIDI-устройств...'
+                : isMidiConnected
+                ? `MIDI подключен: ${midiDeviceName}. Нажмите, чтобы отключить.`
+                : 'MIDI выключен. Нажмите для поиска и подключения клавиатуры.'
+            }
+            className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-mono border transition-all cursor-pointer select-none ${
+              isMidiConnecting
+                ? 'bg-amber-950/40 border-amber-700/50 text-amber-300'
+                : isMidiConnected
+                ? 'bg-emerald-950/60 border-emerald-700/60 text-emerald-300 hover:border-emerald-500 hover:bg-emerald-900/40 shadow-sm'
+                : 'bg-stone-900/50 border-stone-800 text-stone-400 hover:text-amber-200 hover:border-amber-700/60 hover:bg-stone-850'
             }`}
           >
-            <Radio className={`w-3 h-3 ${isMidiConnected ? 'animate-pulse text-emerald-400' : ''}`} />
-            <span className="hidden sm:inline">MIDI</span>
-          </div>
+            {isMidiConnecting ? (
+              <Loader2 className="w-3.5 h-3.5 animate-spin text-amber-400" />
+            ) : (
+              <Radio
+                className={`w-3.5 h-3.5 ${
+                  isMidiConnected ? 'animate-pulse text-emerald-400' : 'text-stone-500'
+                }`}
+              />
+            )}
+            <span className="font-semibold">MIDI</span>
+            <span
+              className={`text-[10px] px-1 py-0.2 rounded font-mono ${
+                isMidiConnected
+                  ? 'bg-emerald-500/20 text-emerald-300'
+                  : 'bg-stone-800/80 text-stone-500'
+              }`}
+            >
+              {isMidiConnecting ? '...' : isMidiConnected ? 'ВКЛ' : 'ВЫКЛ'}
+            </span>
+          </button>
 
           {/* Volume Control */}
           <div className="flex items-center gap-2 bg-stone-900/60 border border-stone-800/60 px-2.5 py-1 rounded-lg">
