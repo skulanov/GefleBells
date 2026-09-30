@@ -8,7 +8,7 @@
 
 import { AudioSettings, BellData, NoteEvent } from '../types/carillon';
 import { getAllSamplesFromDb } from './storageService';
-import { BELL_MAP } from '../data/gefleBellsData';
+import { BELL_MAP, GEFLE_BELLS } from '../data/gefleBellsData';
 
 class CarillonAudioEngine {
   private ctx: AudioContext | null = null;
@@ -83,6 +83,8 @@ class CarillonAudioEngine {
 
       // Load user custom samples from IndexedDB
       await this.loadStoredSamples();
+      // Preload bundled samples from public/samples/ if present
+      await this.preloadBundledSamples();
     }
 
     if (this.ctx.state === 'suspended') {
@@ -136,6 +138,52 @@ class CarillonAudioEngine {
     } catch (e) {
       console.error('Failed reading IndexedDB samples', e);
     }
+  }
+
+  /**
+   * Automatically attempts to preload bundled audio samples from public/samples/
+   * If found in repository, decodes and caches in memory. If not present (e.g. 404), gracefully skips.
+   */
+  public async preloadBundledSamples(): Promise<number> {
+    if (!this.ctx) return 0;
+    const baseUrl = (import.meta.env.BASE_URL || './').replace(/\/+$/, '') + '/';
+    let loadedCount = 0;
+
+    await Promise.all(
+      GEFLE_BELLS.map(async (bell) => {
+        // If already loaded from IndexedDB, don't overwrite
+        if (this.sampleBuffers.has(bell.id)) return;
+
+        const candidates = [
+          `${baseUrl}samples/${bell.expectedFileName}`,
+          `${baseUrl}samples/${encodeURIComponent(bell.expectedFileName)}`,
+        ];
+
+        for (const url of candidates) {
+          try {
+            const response = await fetch(url);
+            if (!response.ok) continue;
+
+            const contentType = response.headers.get('content-type') || '';
+            // If response returned html (Vite SPA index.html fallback on 404), skip
+            if (contentType.includes('text/html')) continue;
+
+            const arrayBuffer = await response.arrayBuffer();
+            if (arrayBuffer.byteLength < 500) continue;
+
+            const decoded = await this.ctx!.decodeAudioData(arrayBuffer);
+            this.sampleBuffers.set(bell.id, decoded);
+            this.customSampleMetadata.set(bell.id, bell.expectedFileName);
+            loadedCount++;
+            break;
+          } catch {
+            // File not present or decode error, skip
+          }
+        }
+      })
+    );
+
+    return loadedCount;
   }
 
   /**
